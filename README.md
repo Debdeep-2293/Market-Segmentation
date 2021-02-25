@@ -1,0 +1,23 @@
+# Market-Segmentation
+Market Segmentation (Segmenting Consumers of Bath Soap)
+Business Situation
+CRISA is a leading market research agency that specializes in tracking consumer purchase behavior in consumer goods (both durable and non-durable). In one major project, CRISA tracks about 30 product categories (e.g. detergents, etc.) and within each category, about 60 – 70 brands. To track purchase behavior, CRISA has constituted about 50,000 household panels in 105 cities and towns in India, covering about 80% of the Indian urban market. (In addition to this, there are 25,000 sample households selected in rural areas; however, we are working with only urban market data). The households are carefully selected using stratified sampling. The strata are defined on the basis of socio-economic status, and the market (a collection of cities).
+CRISA has both transaction data (each row is a transaction) and household data (each row is a household), and, for the household data, maintains the following information:
+• Demographics of the households (updated annually)
+• Possession of durable goods (car, washing machine, etc.; updated annually) and a computed "affluence index" on this basis
+• Purchase data of product categories and brands (updated monthly).
+CRISA has two categories of clients: (1) Advertising agencies who subscribe to the database services; they obtain updated data every month and use it to advise their clients on advertising and promotion strategies. (2) Consumer goods manufacturers who monitor their market share using the CRISA database.
+Key Problems
+CRISA has traditionally segmented markets on the basis of purchaser demographics. They would now like to segment the market based on two key sets of variables more directly related to the purchase process and to brand loyalty:
+1. Purchase behavior (volume, frequency, susceptibility to discounts, and brand loyalty)
+2. Basis of purchase (price, selling proposition)
+Doing so would allow CRISA to gain information about what demographic attributes are associated with different purchase behaviors and degrees of brand loyalty, and more effectively deploy promotion budgets.
+The better and more effective market segmentation would enable CRISA’s clients to design more cost-effective promotions targeted at appropriate segments. Thus, multiple promotions could be launched, each targeted at different market segments at different times of a year. This would result in a more cost-effective allocation of the promotion budget to different market-segments. It would also enable CRISA to design more effective customer reward systems and thereby increase brand loyalty.
+2
+Measuring Brand Loyalty
+Several variables in this case measure aspects of brand loyalty. The number of different brands purchased by the customer is one measure. However, a consumer who purchases one or two brands in quick succession, and then settles on a third for a long streak is different from a consumer who constantly switches back and forth among three brands. So, how often customers switch from one brand to another is another measure of loyalty. Yet a third perspective on the same issue is the proportion of purchases that go to different brands – a consumer who spends 90% of his or her purchase money on one brand is more loyal than a consumer who spends more equally among several brands.
+All three of these components can be measured with the data in the purchase summary worksheet.
+Note: How should the percentages of total purchases comprised by various brands be treated? Isn’t a customer who buys all brand A just as loyal as a customer who buys all brand B? What will be the effect on any distance measure of using the brand share variables as is?
+Clustering approach
+We will consider clustering based, first, on variables that describe purchase behavior, and then, based on variables that describe basis-for-purchase. A third clustering will then consider both sets of variables. A key question is the number of clusters to consider – this can be based on how the clusters will be used. It is likely that the marketing efforts would support 2-7 different promotional approaches. For clusters based on purchase behavior variables alone, or on basis-for-purchase variables alone, the fewer variables may support only 2-3 clusters. Clustering on the combined variables may allow for higher number of useful clusters.
+Remember – clusters are useful only so far as they carry a useful interpretation. And remember the business goal. Given the business goal, it is useful to consider demographic variables in addition to the variables used in clustering, for effective interpretation.
