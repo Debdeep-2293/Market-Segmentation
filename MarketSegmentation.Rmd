@@ -1,0 +1,533 @@
+---
+title: "Untitled"
+author: "Debdeep, Ipseeta, Shreyak"
+date: "4/9/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+#install.packages("gplots")
+#install.packages("ROCR")
+#install.packages("C50")
+```
+
+```{r include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(psych)
+library(lattice)
+library(ggplot2)
+library(caret)
+library(gplots)
+library(ROCR)
+```
+
+### 1. What is the business goal of clustering in this case study?
+
+The business objective of clustering in this case study is to segment the bath soap market based on two key sets of variables more directly related to the purchase process and brand loyalty –
+*purchase behavior and the basis of purchase.*
+
+As stated in the case study, traditionally, markets are segmented based on buyer demographics. Following this modified approach to market segmentation would enable CRISA to design more cost-effective promotions targeting different market segments at different times of the year.
+
+As a result of effectively identifying and targeting these market segments would in turn help –
+•	Cost-effective allocation of promotion budget
+•	Design more effective customer reward system and hence increase brand loyalty.
+
+### 2. Use k-means clustering to identify clusters of households based on
+### a. The variables that describe purchase behavior (including brand loyalty). How will you evaluate brand loyalty – describe the variables you create/use to capture different perspectives on brand loyalty?
+
+### Data exploration and cleaning
+
+Alongwith cleaning the data for further analysis, we have introduced a few new columns - 
+•	maxBr, maxPr, maxProp - computes the maximum brand,price category and selling propsition wise purchase for each member.
+•	popBr, popPr, popProp - identifies the most popular Brand, price category and selling proposition wise purchase respectively for each member. This can be a useful attribute to understand Brand loyalty.
+
+```{r cars, include=FALSE}
+library(tidyverse)
+library(readxl)
+
+
+bsData<- read_excel('Assgt3_BathSoap_Data.xls', sheet ="DM_Sheet")
+#replace with excel
+
+#the data read in may contain empty rows, columns, so remove these
+bsData<-bsData[1:600, 1:46]
+
+#better to change the colNames which contain punctuation, space
+names(bsData) <- gsub("[[:punct:]]|\\s", "_", names(bsData))
+
+#The data with '%' in values are read in as 'chr' type - change these to numeric
+bsData[20:46]<-lapply(bsData[20:46],function(x)  as.numeric(sub("%", "e-2", x)))
+
+
+
+#for brLoyalty, calculate maxBr as max of purchase by different major brand (excl others)
+bsData<-bsData %>% rowwise() %>%  mutate(
+  maxBr=max(Br__Cd__57__144, Br__Cd__55, Br__Cd__272, Br__Cd__286, Br__Cd__24, Br__Cd__481, Br__Cd__352, Br__Cd__5),
+  maxPr=max(Pr_Cat_1,Pr_Cat_2,Pr_Cat_3,Pr_Cat_4),
+  maxProp=max(PropCat_5,PropCat_6,PropCat_7,PropCat_8,PropCat_9,PropCat_10,PropCat_11,PropCat_12,PropCat_13,PropCat_14)
+  )
+  
+  popBr=colnames(bsData[23:30])[apply(bsData[23:30],1,which.max)]
+  popPr=colnames(bsData[32:35])[apply(bsData[32:35],1,which.max)]
+  popProp=colnames(bsData[36:46])[apply(bsData[36:46],1,which.max)]
+  
+bsData<-bsData %>% add_column(popBr, popPr, popProp)
+str(bsData)
+bsd<- bsData
+
+```
+
+Before proceeding with cluster computaion, we convert the variables that cannot be considered as numeric into dummies.
+The variables that are identified for this mofification step are as follows -
+
+•	*FEH* - convert this to dummies, since the values are not ordinal, and remove the '0' level dummy
+•	*MT* - keep levels 0, 4, 5, 10, 17 as dummies, with 0 in the dummies indicating 'other'
+•	*CHILD* - similarly for CHILD, leave out the level '5' for unknown
+•	*SEC* - convert the four values of SEC into dummies
+•	*SEX* - convert the two values 1 and 2 for 'Male' and 'Female' respectively into dummies
+•	*AGE* - convert the four values into dummies
+•	*EDU* - keep significant levels - 1, 4, 5, 7
+•	*HS* - no conversion required as this is numeric. But remove 0s as we would want to avoid 0 household sizes.
+
+```{r include=FALSE}
+
+#Examine the data - can all attributes be considered as 'numeric'
+summary(as.factor(bsd$fehDummy))
+
+#convert this to dummies, since the values are not ordinal, and remove the '0' level dummy
+bsd<-bsd %>% mutate(fehDummy=1) %>% pivot_wider(names_from = FEH, values_from = fehDummy, names_prefix = "FEH_", values_fill = list(fehDummy=0))
+bsd<- bsd %>% select(-FEH_0)  # can append this to the last line too
+
+summary(bsd)
+#explore MT
+summary(as.factor(bsd$MT))
+#keep levels 0, 4, 5, 10, 25 as dummies, with 0 in the dummies indicating 'other'
+bsd<- bsd %>% mutate(MT=if_else(MT %in% c(0, 4, 5, 10, 17), MT, -1))
+bsd<-bsd %>% mutate(mtDummy=1) %>% pivot_wider(names_from = MT, values_from = mtDummy, names_prefix = "MT_", values_fill = list(mtDummy=0)) 
+bsd<- bsd %>% select(- `MT_-1`)
+
+#similarly for CHILD, leave out the level '5' for unknown
+bsd<-bsd %>% mutate(mtChild=1) %>% pivot_wider(names_from = CHILD, values_from = mtChild, names_prefix = "CHILD_", values_fill = list(mtChild=0)) %>% select(- CHILD_5) 
+
+#SEC
+bsd<-bsd %>% mutate(secDummy=1) %>% pivot_wider(names_from = SEC, values_from = secDummy, names_prefix = "SEC_", values_fill = list(secDummy=0))
+
+bsd<-bsd %>% mutate(sexDummy=1) %>% pivot_wider(names_from = SEX, values_from = sexDummy, names_prefix = "SEX_", values_fill = list(sexDummy=0))
+bsd<- bsd %>% select(- SEX_0)
+
+summary(as.factor(bsd$AGE))
+bsd<-bsd %>% mutate(ageDummy=1) %>% pivot_wider(names_from = AGE, values_from = ageDummy, names_prefix = "AGE_", values_fill = list(ageDummy=0))
+
+summary(as.factor(bsd$EDU))
+bsd<- bsd %>% mutate(EDU=if_else(EDU %in% c(1, 4, 5, 7), EDU, -1))
+bsd<-bsd %>% mutate(eduDummy=1) %>% pivot_wider(names_from = EDU, values_from = eduDummy, names_prefix = "EDU_", values_fill = list(eduDummy=0)) %>% select(- `EDU_-1`)
+
+summary(as.factor(bsd$HS))
+bsd<- bsd[!(bsd$HS==0),]
+
+```
+
+For identifying clusters based on variables that describe purchase behaviour, we have considered the following list of variables -
+*No__of_Brands* - Gives an idea on the number of of brands purchased by a member
+*Brand_Runs* - Number of times a member makes consecutive purchases of brands
+*Total_Volume* - Quantity purchase by a member
+*No__of__Trans* - Number of purchase transactions made by a member
+*Value* - Total value
+*Trans___Brand_Runs* - Avg. transactions per brand run. This is a better parameter to summarise the data from total transactions and brand runs
+*Vol_Tran* - Avg. volume per transaction. This summarises Volume and Transaction in a better way
+*Avg__Price* - Avg. price would be helpful 
+*maxBr* - The maximum percent of volume purchased of all the brands would give a better estimate on volume of purchase and corresponding maxPop would guve an idea on the brand preffered by a member.
+*Others_999* - The maximum percent of volume purchased of other brands.
+
+For the first cluster we have used 3 centers and nstart = 25
+
+```{r echo=FALSE}
+library(factoextra)
+   #https://www.rdocumentation.org/packages/factoextra/versions/1.0.3
+
+#kmeans -- https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/kmeans
+
+#clustering on  purchase behavior varables
+PURCHASE_BEHAVIOR <- c('No__of_Brands', 'Brand_Runs', 'Total_Volume', 'No__of__Trans', 'Value', 'Trans___Brand_Runs', 'Vol_Tran', 'Avg__Price','maxBr', 'Others_999')
+
+x<- bsd
+kmClus_pb1<- x %>% select(PURCHASE_BEHAVIOR) %>% scale() %>% kmeans(centers=3, nstart=25)
+
+#Or create a scaled dataset for clustering, and use this (seperating it into 2 steps)
+xpb1<-x %>% select(PURCHASE_BEHAVIOR) %>% scale() 
+
+
+#visualize the cluster - based on variables used for clustering
+fviz_cluster(kmClus_pb1, data=x %>% select(PURCHASE_BEHAVIOR))
+
+  #https://www.rdocumentation.org/packages/factoextra/versions/1.0.6/topics/fviz_cluster
+
+
+#add the cluster variable to the data and check the cluster descriptions in terms of broader set of variables
+x <- x %>% mutate(clusKM=kmClus_pb1$cluster)
+
+x %>% group_by(clusKM) %>% summarise_at(c('SEC_1','SEC_2','SEC_3', 'HS', 'SEX_1', "SEX_2", 'EDU_1','EDU_4','EDU_5','EDU_7', 'Affluence_Index', 'AGE_1','AGE_2','AGE_3','AGE_4', 'CHILD_1', 'CHILD_2', 'CHILD_3', 'CHILD_4', 'maxBr', 'No__of_Brands', 'No__of__Trans', 'Brand_Runs', 'Total_Volume', 'Value', 'Trans___Brand_Runs'), mean, ) %>% view()
+
+
+```
+
+We notice that the wss for this clustering is 5310. 
+Inorder to figure out the ideal segments, we have used both elbow and silhoutte to arrive at the optimal k value for this cluster. 
+
+**Elbow method**
+
+```{r echo=FALSE}
+
+#how many clusters is best
+
+fviz_nbclust(xpb1, kmeans, method = "wss")
+#k = 4
+
+kmClus_pb2<- x %>% select(PURCHASE_BEHAVIOR) %>% scale() %>% kmeans(centers=4, nstart=25)
+fviz_cluster(kmClus_pb2, data=x %>% select(PURCHASE_BEHAVIOR))
+
+
+```
+
+From the Elbow method, we find that optimum value of k = 4, so we modify the cluster accordingly for analysis.
+
+**Silhouette method**
+
+```{r echo=FALSE}
+fviz_nbclust(xpb1, kmeans, method = "silhouette")
+
+kmClus_pb3<- x %>% select(PURCHASE_BEHAVIOR) %>% scale() %>% kmeans(centers=2, nstart=25)
+
+fviz_cluster(kmClus_pb3, data=x %>% select(PURCHASE_BEHAVIOR))
+
+
+```
+
+Using this method, we found out the optimal k value is 2 and modified the clusters accordingly.
+
+Now, to evaluate the different clusters for purchase behaviour among customers, we compare the clusters based on information provided by k-means - 
+**totss**: The total sum of squares.
+**withinss**: Vector of within-cluster sum of squares, one component per cluster.
+**tot.withinss**: Total within-cluster sum of squares, i.e. sum(withinss).
+**betweenss**: The between-cluster sum of squares, i.e. $totss-tot.withinss$.
+
+
+**Comparing our finds**
+
+### 2 b. The variables that describe basis-for-purchase.
+### [Variables: purchase by promotions, price categories, selling propositions]
+### [Q – would you use all selling propositions? Explore the data.]
+
+For identifying clusters based on variables that describe basis-for-purchase, we have considered the following list of variables -
+*HS* - The household size could be indicator basis of purchase
+*Pur_Vol_No_Promo____* - Percent of volume purchased under no-promotion
+*Pur_Vol_Promo_6__* - Percent of volume purchased under Promotion Code 6
+*Pur_Vol_Other_Promo__* - Percent of volume purchased under other promotions
+*maxPr* - The per cent of volume purchased under the price category is a good parameter to describe basis-for purchase. So we have taken the max percentage contribution 
+*maxProp* - Selling proposition is another interesting parameter to understand a member's basis of purchase. When we look closely into the different selling propositions, we observed that Cat 15 corresponds to Any other propositions. Since this would may lead to anomalies in our result, we excluded Cat 15 from the calculation of MaxProp.
+
+```{r echo=FALSE}
+BASIS_FOR_PURCHASE <- c('HS','Pur_Vol_No_Promo____', 'Pur_Vol_Promo_6__', 'Pur_Vol_Other_Promo__', 'maxPr', 'maxProp')
+
+str(bsd)
+kmClus_bfp1<- x %>% select(BASIS_FOR_PURCHASE) %>% scale() %>% kmeans(centers=3, nstart=25)
+
+#Or create a scaled dataset for clustering, and use this (seperating it into 2 steps)
+xpb_2<-x %>% select(BASIS_FOR_PURCHASE) %>% scale() 
+
+
+#visualize the cluster - based on variables used for clustering
+fviz_cluster(kmClus_bfp1, data=x %>% select(BASIS_FOR_PURCHASE))
+
+  #https://www.rdocumentation.org/packages/factoextra/versions/1.0.6/topics/fviz_cluster
+
+
+#add the cluster variable to the data and check the cluster descriptions in terms of broader set of variables
+x <- x %>% mutate(clusKM=kmClus_bfp1$cluster)
+
+x %>% group_by(clusKM) %>% summarise_at(c('SEC_1','SEC_2','SEC_3', 'HS', 'SEX_1', "SEX_2", 'EDU_1','EDU_4','EDU_5','EDU_7', 'Affluence_Index', 'AGE_1','AGE_2','AGE_3','AGE_4', 'CHILD_1', 'CHILD_2', 'CHILD_3', 'CHILD_4', 'HS', 'maxPr', 'maxProp', 'Pur_Vol_No_Promo____', 'Pur_Vol_Promo_6__', 'Pur_Vol_Other_Promo__'), mean ) %>% view()
+```
+
+**Elbow method**
+
+```{r echo=FALSE}
+
+#how many clusters is best
+fviz_nbclust(xpb_2, kmeans, method = "wss")
+#k = 3
+
+kmClus_bfp2<- x %>% select(BASIS_FOR_PURCHASE) %>% scale() %>% kmeans(centers=4, nstart=25)
+
+fviz_cluster(kmClus_bfp2, data=x %>% select(BASIS_FOR_PURCHASE))
+
+```
+
+The graph from the Elbow method  shows that the curve appears to start flattening from k=3. So we can pick a values from 3,4 and 5. Since we have already experimented with 3, here we have made a cluster using k=4.
+
+**Silhouette method**
+
+```{r echo=FALSE}
+fviz_nbclust(xpb_2, kmeans, method = "silhouette")
+
+kmClus_bfp3<- x %>% select(BASIS_FOR_PURCHASE) %>% scale() %>% kmeans(centers=5, nstart=25)
+fviz_cluster(kmClus_bfp3, data=x %>% select(BASIS_FOR_PURCHASE))
+
+```
+
+**Comparing our finds**
+
+### 2 c. The variables that describe both purchase behavior and basis of purchase.
+
+Here, we have included all variables that were included in previous 2 sections. And we start off by creating a cluster with 3 centers.
+
+```{r echo=FALSE}
+ALL_PARAMETERS <- c('No__of_Brands', 'Brand_Runs', 'Total_Volume', 'No__of__Trans', 'Value', 'Trans___Brand_Runs', 'Vol_Tran', 'Avg__Price','maxBr', 'Others_999', 'HS','Pur_Vol_No_Promo____', 'Pur_Vol_Promo_6__', 'Pur_Vol_Other_Promo__', 'maxPr', 'maxProp')
+
+str(bsd)
+kmClus_all<- x %>% select(ALL_PARAMETERS) %>% scale() %>% kmeans(centers=3, nstart=25)
+
+#Or create a scaled dataset for clustering, and use this (seperating it into 2 steps)
+xpb_3<-x %>% select(ALL_PARAMETERS) %>% scale() 
+
+
+#visualize the cluster - based on variables used for clustering
+fviz_cluster(kmClus_all, data=x %>% select(BASIS_FOR_PURCHASE))
+
+  #https://www.rdocumentation.org/packages/factoextra/versions/1.0.6/topics/fviz_cluster
+
+
+#add the cluster variable to the data and check the cluster descriptions in terms of broader set of variables
+x <- x %>% mutate(clusKM=kmClus_all$cluster)
+
+x %>% group_by(clusKM) %>% summarise_at(c('SEC_1','SEC_2','SEC_3', 'HS', 'SEX_1', "SEX_2", 'EDU_1','EDU_4','EDU_5','EDU_7', 'Affluence_Index', 'AGE_1','AGE_2','AGE_3','AGE_4', 'CHILD_1', 'CHILD_2', 'CHILD_3', 'CHILD_4','maxBr', 'No__of_Brands', 'No__of__Trans', 'Brand_Runs', 'Total_Volume', 'Value', 'Trans___Brand_Runs', 'HS', 'maxPr', 'maxProp', 'Pur_Vol_No_Promo____', 'Pur_Vol_Promo_6__', 'Pur_Vol_Other_Promo__'), mean, ) %>% view()
+```
+
+**Elbow method**
+
+```{r echo=FALSE}
+
+#how many clusters is best
+fviz_nbclust(xpb_3, kmeans, method = "wss")
+#k = 4
+
+kmClus_all<- x %>% select(ALL_PARAMETERS) %>% scale() %>% kmeans(centers=4, nstart=25)
+
+fviz_cluster(kmClus_all, data=x %>% select(ALL_PARAMETERS))
+kmClus_all$tot.withinss
+```
+
+
+
+**Silhouette method**
+
+```{r echo=FALSE}
+fviz_nbclust(xpb_3, kmeans, method = "silhouette")
+
+kmClus_all<- x %>% select(ALL_PARAMETERS) %>% scale() %>% kmeans(centers=2, nstart=25)
+
+fviz_cluster(kmClus_all, data=x %>% select(ALL_PARAMETERS))
+
+
+```
+
+**Comparing our finds**
+
+### 3. Try two other clustering methods (for a single person team, try one other method) for the questions above - from agglomerative clustering, k-medoids, kernel-k-means, and DBSCAN clustering. Show how you experiment with different parameter values for the different techniques, and how these affect the clusters obtained.
+
+
+K-means clustering algorithm is sensitive to noise and outlier data points because a small number of such data can substantially influence the mean value. Looking into k-medoids or Partitioning around medoids.
+
+```{r}
+##PAM - Partitioning around mediods
+library(cluster)
+#xpb1: PURCHASE_BEHAVIOR (k=2)
+#xpb_2: BASIS_FOR_PURCHASE (k=3)
+#xpb_3: ALL_PARAMETERS(k=2)
+
+#PURCHASE_BEHAVIOR:
+pam_pb<-pam(xpb1, k=2, metric = "euclidean")
+#Partitioning Around Mediods
+pam_pb
+pam_pb$clusinfo
+
+fviz_cluster(pam_pb)
+
+#silhoutte plot:
+si <- silhouette(pam_pb)
+summary(si)
+plot(si, col=1:3, border=NA)
+
+#*k=2, 0.2   
+#k=3, 0.16
+
+
+
+#BASIS_FOR_PURCHASE:
+pam_pb2<-pam(xpb_2, k=3, metric = "euclidean")
+#Partitioning Around Mediods
+pam_pb2
+pam_pb2$clusinfo
+
+fviz_cluster(pam_pb2)
+
+#silhoutte plot:
+si2 <- silhouette(pam_pb2)
+summary(si2)
+plot(si2, col=1:3, border=NA)
+
+#*k=3, 0.25
+#k=2, 0.22
+
+#ALL_PARAMETERS:
+pam_pb3<-pam(xpb_3, k=2, metric = "euclidean")
+#Partitioning Around Mediods
+pam_pb3
+pam_pb3$clusinfo
+
+fviz_cluster(pam_pb3)
+
+#Silhoutte plot:
+si3 <- silhouette(pam_pb3)
+summary(si3)
+plot(si3, col=1:3, border=NA)
+
+#*k=2, 0.17
+#k=3, 0.1
+
+```
+
+Using k-medoids for indentifying clusters for households:
+For PURCHASE_BEHAVIOR, the average silhouette width is maximum for k = 2 which implies better clustering at k=2.
+
+For BASIS_FOR_PURCHASE, the average silhouette width is maximum for k = 3 which implies better clustering at k=3.
+
+For ALL_PARAMETERS, the average silhouette width is maximum for k=2 which implies better clustering at k=2.
+
+
+```{r echo=FALSE}
+library(cluster)
+#Basis for Purchase and purchase behaviour
+xdist <- dist(xpb_3, method = "euclidean")
+
+#using agnes from the cluster package
+hierC_pb_ag_c <- agnes(xdist, method = "complete" )
+hierC_pb_ag_w <- agnes(xdist, method = "ward" )
+hierC_pb_ag_a <- agnes(xdist, method = "average" )
+
+#check the agglomerative coeff given by agnes
+hierC_pb_ag_a$ac
+
+
+#use cuttree to assign different clusters to examples
+cut3_hierC_pb_ac_c <- cutree(hierC_pb_ag_c, k = 3)
+
+cut3_hierC_pb_ac_w <- cutree(hierC_pb_ag_w, k = 3)
+
+#dendograms using fviz_dend
+fviz_dend(hierC_pb_ag_c)
+
+fviz_dend(hierC_pb_ag_w, k=3, color_labels_by_k = FALSE, rect=TRUE, main="agnes - complete")
+
+#circular dendogram
+fviz_dend(hierC_pb_ag_w, k=2, color_labels_by_k = TRUE, type="circular", rect=TRUE, main="agnes - ward")
+
+x <- x %>% mutate(clusKM=cut3_hierC_pb_ac_w)
+```
+
+We have implemented the Hierarchical Cluster on different ways to classify household namely Purchase behavior of Customers, Basis for Purchase and also for both (Purchase Behaviour and basis for purchase).
+
+Parameters used to evaluate are complete linkage, average linkage , Ward’s minimum variance method and Agglomerative Coefficient. We have also used the function cuttree to cut the dendogram at proper level and hence find the optimum number of clusters.
+
+On the basis of above mentioned plots (Dendrograms) and Agglomerative Coefficients , we can conclude that the Ward minimum variance method is producing the best result for all the three clustering approaches. The Coefficient value is also to closest to 1 and also all the clusters can been seen independently without any overlap.
+
+
+### 4. (a) Are the clusters obtained from the different procedures similar/different? Describe how they are similar/different.
+
+The clusters obtained from different procedure namely K-means, Agglomerative Clustering and K-medoids are different. For different values of K and different distance between clusters, there is variation in terms of interpretation of the data points. As we are taking the same value of K by using the elbow method and silhouette methods for both K-means and K-mediods , the clusters are comparatively similar and equally interpretable. While in Hierarchical Clustering Method, we need not assume any particular number of cluster beforehand rather we obtaine the desired number of clusters in our case 3, by cutting the dendogram at proper level.
+
+
+
+### 4. (b) Select what you think is the 'best' segmentation - explain why you think this is the ‘best’. You can also decide on multiple segmentations, based on different criteria -- for example, based on purchase behavior, or basis for purchase,....(think about how different clusters may be useful.
+
+Drawing conclusions from above, we can say that the best segmentation can be derived for different criteria. 
+So, we have picked up 2 segmentations that we believe are ideal for understand customer purchase behavoiour and can be used for market segmentaion inorder to target appropriate audience -
+
+•	**Best segmentation considering Basis-for-Purchase**
+We believe that this would provide one of the most valuable insights into a member's buying decisions. The variables included for this criteria reflect how a member responds to different price categories and selling propositions. Identifying clusters in this criteria would aid future decisions on promotional activities of products for the indutry. The following is a viualization of the best segmention for this criteria.
+
+```{r echo=FALSE}
+fviz_cluster(kmClus_bfp1, data=x %>% select(BASIS_FOR_PURCHASE))
+```
+
+Through a thorough analysis on these parameters using clustering methods - k-means, k-mediods and hierarchical clustering we have concluded that using the K-means clusters with 3 centers would help give an insight into the trends corresponding to Basis-of-purchase. Here, the clusters are distinct and have lower variance among each cluster.
+
+
+
+•	**Best segmentation considering all parameters**
+
+On the basis of the results from Hierarchical Clustering, by combining the variables of Basis for Purchase and Purchase Behavior would allow CRISA’s clients  to design more cost effective promotions targeted at appropriate segments.
+
+Having the minimum distance between the data points within the same cluster but having the maximum distance between different clusters, it can be interpreted easily. By combining both the characteristics we are able to understand which customers can be targeted on the basis of the following scenarios:
+•	Brand loyalty combined with the type of product (Beauty, Hair, Skincare etc).
+•	Volume of products, price and susceptibility to discounts in order to attract the right customer for the right product at the best possible price.
+•	Keeping a track of the number of runs of purchasing the same brand due to certain promotional activities by a set of customers.
+All these scenarios can be easily achieved based upon the cluster segmentation which we have provided via Agglomerative Clustering.
+
+
+
+### 4. (c) For one ‘best’ segmentation, obtain a description of the clusters by building a decision tree to help describe the clusters. How effective is the tree in helping explaining/interpreting the cluster(s)? (explain why/why not). (You may use a decision tree to help choose the ‘best’ clustering).
+
+For building a decision tree on the best segmentation, we have chosen the heirarchical clustering method corresponding to the criteria including all variables of purchase behaviour and basis-for-purchase. The last column of original dataset is mutated with the clusters from the best hierarchical model, which becomes the dependent variable.
+
+```{r}
+x <- x %>% mutate(clusKM=cut3_hierC_pb_ac_w)
+```
+
+We have used Rpart package to construct the Decision Tree and started woth dividing the Dataset into 70/30 train - test data sets.
+
+```{r echo=FALSE}
+library(rpart)
+library(rpart.plot)
+library(ROCR)
+#split the data into trn, tst subsets
+set.seed(123)
+nr<-nrow(x)
+trnIndex<- sample(1:nr, size = round(0.7*nr), replace=FALSE)
+xTrn <- x[trnIndex, ]
+xTst <- x[-trnIndex, ]
+
+kmeansDT1 <- rpart(clusKM ~., data=xTrn, method="class", parms = list(split = "information"), control = rpart.control(cp=0.0001, minsplit = 30))
+
+kmeansDT4 <- rpart(clusKM ~., data=xTrn, method="class", parms = list(split = "gini"), control = rpart.control(cp=0.0003, minsplit = 20))
+
+
+```
+From the training the decision trees we option 4 DTs with `information` and `gini` split on different values of cp and minsplit.
+The following comparison of accuracies on test and trainig  data helps us identify the best DT - 
+
+```{r}
+#Evaluate performance
+predTrn=predict(kmeansDT4,xTrn, type='class')
+t1 <- table(pred = predTrn, true=xTrn$clusKM)
+mean(predTrn == xTrn$clusKM)
+
+predTst=predict(kmeansDT4,xTst, type='class')
+t1 <- table(pred = predTst, true=xTst$clusKM)
+mean(predTst == xTst$clusKM)
+
+
+```
+```{r echo=FALSE}
+par(mfrow = c(2,2))
+rpart.plot(kmeansDT4)
+x %>% group_by(clusKM) %>% summarise_at(c('No__of_Brands', 'No__of__Trans', 'Brand_Runs', 'Total_Volume', 'Value', 'Trans___Brand_Runs', 'HS','maxBr', 'popBr', 'maxPr', 'maxProp', 'Pur_Vol_No_Promo____', 'Pur_Vol_Promo_6__', 'Pur_Vol_Other_Promo__'), mean, ) %>% view()
+
+x %>% group_by(clusKM) %>% summarise_at(c('SEC_1','SEC_2','SEC_3', 'HS', 'SEX_1', "SEX_2", 'EDU_1','EDU_4','EDU_5','EDU_7', 'Affluence_Index', 'AGE_1','AGE_2','AGE_3','AGE_4', 'CHILD_1', 'CHILD_2', 'CHILD_3', 'CHILD_4'), mean, ) %>% view()
+```
+
+The decision tree shows the most important variables and the approach to arrive to each cluster. Although a few clusters show proper definition with leaf nodes showing score of more that 0.9 for the recognized clusters, when applied to unseen data, the DT doesn't provide satisfactory results.
+
+
+
